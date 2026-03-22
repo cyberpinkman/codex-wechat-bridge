@@ -1,0 +1,16 @@
+{
+  "name": "codex-wechat-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Experimental bridge for sending messages into an existing Codex thread.",
+  "scripts": {
+    "latest": "node ./src/index.mjs latest",
+    "locate": "node ./src/index.mjs locate",
+    "send": "node ./src/index.mjs send",
+    "serve": "node ./src/server.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

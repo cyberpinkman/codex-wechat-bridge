@@ -1,0 +1,13 @@
+{
+  "sessionId": "YOUR-CODEX-SESSION-ID",
+  "codexHome": "/absolute/path/to/.codex",
+  "cwd": "/absolute/path/for/codex/workdir",
+  "host": "127.0.0.1",
+  "port": 4318,
+  "weixin": {
+    "enabled": true,
+    "accountId": "YOUR-WEIXIN-ACCOUNT-ID",
+    "syncFile": "/absolute/path/to/codex-wechat-bridge/tmp/weixin-sync.json",
+    "pollTimeoutMs": 35000
+  }
+}
