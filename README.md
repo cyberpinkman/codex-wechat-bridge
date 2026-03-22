@@ -4,12 +4,12 @@ An experimental bridge project for sending messages into an existing Codex sessi
 
 This project is intentionally separate from OpenClaw and IncenseClaw.
 
-## What works today
+## What this project does
 
-- Resolve the latest Codex session id from `~/.codex/session_index.jsonl`
-- Locate the transcript file for a specific session
-- Send a message into an existing Codex thread with `codex exec resume`
-- Capture the final assistant reply via `-o <file>`
+- Continue an existing Codex thread by session id
+- Expose a small local HTTP API for sending messages into that thread
+- Optionally long-poll a Weixin account and relay inbound text to Codex
+- Send Codex's final reply back to Weixin
 
 ## Why this approach
 
@@ -23,15 +23,29 @@ That gives us a programmatic way to:
 2. inject a new message
 3. capture the assistant's final reply
 
+## Requirements
+
+- Node.js 22+
+- A local `codex` CLI install
+- A local Codex desktop/CLI environment with resumable sessions
+- Optional: an OpenClaw Weixin login if you want relay mode
+
 ## Quick start
 
-Optional config:
+1. Clone the repo
+2. Copy `bridge.config.json.example` to `bridge.config.json`
+3. Fill in your own local values
+4. Run the CLI or HTTP server
 
-1. Copy `bridge.config.json.example` to `bridge.config.json`
-2. Set your target `sessionId`
-3. Set absolute local paths for `codexHome`, `cwd`, and the Weixin state/config fields
+```bash
+git clone https://github.com/cyberpinkman/codex-wechat-bridge.git
+cd codex-wechat-bridge
+cp bridge.config.json.example bridge.config.json
+```
 
-Examples:
+## Minimal usage
+
+Useful commands:
 
 ```bash
 cd /path/to/codex-wechat-bridge
@@ -40,7 +54,7 @@ npm run locate -- --session-id YOUR-CODEX-SESSION-ID
 npm run send -- --session-id YOUR-CODEX-SESSION-ID --message "reply with hello only"
 ```
 
-Structured output:
+Structured JSON output:
 
 ```bash
 node ./src/index.mjs send \
@@ -48,6 +62,88 @@ node ./src/index.mjs send \
   --message "reply with hello only" \
   --json
 ```
+
+## HTTP bridge
+
+Start the local bridge:
+
+```bash
+cd /path/to/codex-wechat-bridge
+npm run serve
+```
+
+Then test it:
+
+```bash
+curl http://127.0.0.1:4318/health
+```
+
+```bash
+curl -X POST http://127.0.0.1:4318/bridge/send \
+  -H 'content-type: application/json' \
+  -d '{"sessionId":"YOUR-CODEX-SESSION-ID","message":"reply with hello only"}'
+```
+
+## Configuration reference
+
+Example config fields:
+
+```json
+{
+  "sessionId": "YOUR-CODEX-SESSION-ID",
+  "codexHome": "/absolute/path/to/.codex",
+  "cwd": "/absolute/path/for/codex/workdir",
+  "host": "127.0.0.1",
+  "port": 4318,
+  "weixin": {
+    "enabled": true,
+    "accountId": "YOUR-WEIXIN-ACCOUNT-ID",
+    "syncFile": "/absolute/path/to/codex-wechat-bridge/tmp/weixin-sync.json",
+    "pollTimeoutMs": 35000,
+    "stateDir": "/absolute/path/to/.openclaw"
+  }
+}
+```
+
+Field meanings:
+
+- `sessionId`: Codex thread id to resume into
+- `codexHome`: local Codex home directory, usually `~/.codex`
+- `cwd`: working directory used by `codex exec resume`
+- `host`: HTTP bind host for this bridge
+- `port`: HTTP bind port for this bridge
+- `weixin.enabled`: enable the built-in Weixin relay loop
+- `weixin.accountId`: local Weixin account id created by the plugin login flow
+- `weixin.syncFile`: local file used by this project to store its own Weixin polling cursor
+- `weixin.pollTimeoutMs`: long-poll timeout for `getupdates`
+- `weixin.stateDir`: local OpenClaw state directory, usually `~/.openclaw`
+
+## How to find your local values
+
+### Find the Codex session id
+
+Use:
+
+```bash
+cd /path/to/codex-wechat-bridge
+npm run latest
+```
+
+Or inspect:
+
+```bash
+cat ~/.codex/session_index.jsonl
+```
+
+### Find your Weixin account id
+
+After logging in with the OpenClaw Weixin plugin, inspect:
+
+```bash
+cat ~/.openclaw/openclaw-weixin/accounts.json
+```
+
+That file contains the account ids you can use as `weixin.accountId`.
 
 ## Run the local HTTP bridge
 
@@ -70,21 +166,6 @@ curl -X POST http://127.0.0.1:4318/bridge/send \
   -d '{"sessionId":"YOUR-CODEX-SESSION-ID","message":"reply with hello only"}'
 ```
 
-## Known rough edges
-
-- You may see local Codex warnings depending on your machine's install state.
-- The bridge currently relies on the local `codex exec resume` behavior and transcript discovery.
-
-## Next step for WeChat integration
-
-The next layer is to let the WeChat side call this local HTTP service:
-
-- inbound webhook/message from WeChat side
-- POST to `/bridge/send`
-- send the returned `reply` back to WeChat
-
-This HTTP piece is now implemented in the MVP.
-
 ## Weixin relay mode
 
 If `bridge.config.json` contains a `weixin.enabled: true` section, `npm run serve` will also:
@@ -98,14 +179,20 @@ Important:
 
 - Do not let OpenClaw's own Weixin monitor and this bridge consume the same account at the same time.
 - For the cleanest test, stop the OpenClaw gateway first, then run this bridge.
+- This relay currently focuses on text messages for the MVP.
 
-## Required local fields
+## Operating notes
 
-These fields are intentionally left as placeholders and must be filled in by each user:
+- The bridge does not store your Weixin token in the repo.
+- Your real `bridge.config.json` is intentionally ignored by git.
+- Your local machine paths, account ids, and session ids must be supplied by each user.
 
-- `sessionId`: the Codex thread you want to bridge into
-- `codexHome`: usually your local `.codex` directory
-- `cwd`: the working directory Codex should use when resuming
-- `weixin.accountId`: the saved Weixin account id created by the plugin login flow
-- `weixin.syncFile`: a local path where this bridge stores its own polling cursor
-- `weixin.stateDir`: your local OpenClaw state directory if you want relay mode
+## Known rough edges
+
+- You may see local Codex warnings depending on your machine's install state.
+- The bridge currently relies on the local `codex exec resume` behavior and transcript discovery.
+- The Weixin relay is intentionally minimal and not production-hardened.
+
+## Architecture
+
+See [docs/architecture.md](./docs/architecture.md).
