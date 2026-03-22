@@ -80,8 +80,9 @@ curl http://127.0.0.1:4318/health
 
 ```bash
 curl -X POST http://127.0.0.1:4318/bridge/send \
+  -H 'authorization: Bearer SET-A-LONG-RANDOM-TOKEN' \
   -H 'content-type: application/json' \
-  -d '{"sessionId":"YOUR-CODEX-SESSION-ID","message":"reply with hello only"}'
+  -d '{"message":"reply with hello only"}'
 ```
 
 ## Configuration reference
@@ -95,12 +96,24 @@ Example config fields:
   "cwd": "/absolute/path/for/codex/workdir",
   "host": "127.0.0.1",
   "port": 4318,
+  "http": {
+    "authToken": "SET-A-LONG-RANDOM-TOKEN",
+    "allowSessionOverride": false,
+    "maxBodyBytes": 16384
+  },
+  "codex": {
+    "timeoutMs": 120000,
+    "maxQueueDepth": 4,
+    "dangerousBypass": false
+  },
   "weixin": {
     "enabled": true,
     "accountId": "YOUR-WEIXIN-ACCOUNT-ID",
     "syncFile": "/absolute/path/to/codex-wechat-bridge/tmp/weixin-sync.json",
     "pollTimeoutMs": 35000,
-    "stateDir": "/absolute/path/to/.openclaw"
+    "stateDir": "/absolute/path/to/.openclaw",
+    "allowOwner": true,
+    "allowFrom": []
   }
 }
 ```
@@ -112,11 +125,19 @@ Field meanings:
 - `cwd`: working directory used by `codex exec resume`
 - `host`: HTTP bind host for this bridge
 - `port`: HTTP bind port for this bridge
+- `http.authToken`: required token for `POST /bridge/send`
+- `http.allowSessionOverride`: when `false`, callers cannot choose a different session id
+- `http.maxBodyBytes`: maximum accepted HTTP request body size
+- `codex.timeoutMs`: max time allowed for one `codex exec resume` call
+- `codex.maxQueueDepth`: max queued bridge requests before rejecting
+- `codex.dangerousBypass`: when `true`, re-enable `--dangerously-bypass-approvals-and-sandbox`
 - `weixin.enabled`: enable the built-in Weixin relay loop
 - `weixin.accountId`: local Weixin account id created by the plugin login flow
 - `weixin.syncFile`: local file used by this project to store its own Weixin polling cursor
 - `weixin.pollTimeoutMs`: long-poll timeout for `getupdates`
 - `weixin.stateDir`: local OpenClaw state directory, usually `~/.openclaw`
+- `weixin.allowOwner`: when `true`, only the linked owner account is allowed by default
+- `weixin.allowFrom`: optional extra Weixin user ids allowed to control the relay
 
 ## How to find your local values
 
@@ -162,8 +183,9 @@ Send a message into the configured Codex thread:
 
 ```bash
 curl -X POST http://127.0.0.1:4318/bridge/send \
+  -H 'authorization: Bearer SET-A-LONG-RANDOM-TOKEN' \
   -H 'content-type: application/json' \
-  -d '{"sessionId":"YOUR-CODEX-SESSION-ID","message":"reply with hello only"}'
+  -d '{"message":"reply with hello only"}'
 ```
 
 ## Weixin relay mode
@@ -180,18 +202,23 @@ Important:
 - Do not let OpenClaw's own Weixin monitor and this bridge consume the same account at the same time.
 - For the cleanest test, stop the OpenClaw gateway first, then run this bridge.
 - This relay currently focuses on text messages for the MVP.
+- By default, only the linked owner account is allowed to control the relay unless you expand `weixin.allowFrom`.
 
 ## Operating notes
 
 - The bridge does not store your Weixin token in the repo.
 - Your real `bridge.config.json` is intentionally ignored by git.
 - Your local machine paths, account ids, and session ids must be supplied by each user.
+- The HTTP bridge expects an auth token for message injection.
+- Cross-thread HTTP overrides are disabled by default.
+- If you want to preserve the previous "Codex can execute without approvals" behavior on your own machine, set `codex.dangerousBypass` to `true` in your ignored local `bridge.config.json`.
 
 ## Known rough edges
 
 - You may see local Codex warnings depending on your machine's install state.
 - The bridge currently relies on the local `codex exec resume` behavior and transcript discovery.
 - The Weixin relay is intentionally minimal and not production-hardened.
+- If you need Codex to execute commands without approvals, you must explicitly opt in via `codex.dangerousBypass`.
 
 ## Architecture
 

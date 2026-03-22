@@ -27,6 +27,23 @@ function shouldHandleMessage(message) {
   return Boolean(extractBody(message));
 }
 
+function isAuthorizedSender(message, account, weixin) {
+  const senderId = typeof message?.from_user_id === "string" ? message.from_user_id.trim() : "";
+  const allowedSenders = new Set(
+    (Array.isArray(weixin?.allowFrom) ? weixin.allowFrom : []).filter(Boolean)
+  );
+
+  if (weixin?.allowOwner !== false && account.userId) {
+    allowedSenders.add(account.userId);
+  }
+
+  if (allowedSenders.size === 0) {
+    return false;
+  }
+
+  return allowedSenders.has(senderId);
+}
+
 async function readSyncCursor(syncFile) {
   try {
     const raw = await fs.readFile(syncFile, "utf8");
@@ -80,14 +97,22 @@ export async function startWeixinRelay({
             continue;
           }
 
+          if (!isAuthorizedSender(message, account, weixin)) {
+            log("[weixin-relay] ignored unauthorized sender");
+            continue;
+          }
+
           const body = extractBody(message);
-          log(`[weixin-relay] inbound from=${message.from_user_id} body=${body}`);
+          log(`[weixin-relay] inbound accepted bodyLength=${body.length}`);
 
           const result = await sendMessageToCodexThread({
             codexHome: codex.codexHome,
             cwd: codex.cwd,
             sessionId: codex.sessionId,
-            message: body
+            message: body,
+            timeoutMs: codex.timeoutMs,
+            dangerousBypass: codex.dangerousBypass,
+            maxQueueDepth: codex.maxQueueDepth
           });
 
           await sendWeixinText({
@@ -98,7 +123,7 @@ export async function startWeixinRelay({
             text: result.reply
           });
 
-          log(`[weixin-relay] replied to=${message.from_user_id} reply=${result.reply}`);
+          log(`[weixin-relay] reply sent replyLength=${result.reply.length}`);
         }
       } catch (error) {
         log(`[weixin-relay] error: ${error instanceof Error ? error.message : String(error)}`);

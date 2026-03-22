@@ -4,10 +4,23 @@
   "cwd": "/absolute/path/for/codex/workdir",
   "host": "127.0.0.1",
   "port": 4318,
+  "http": {
+    "authToken": "SET-A-LONG-RANDOM-TOKEN",
+    "allowSessionOverride": false,
+    "maxBodyBytes": 16384
+  },
+  "codex": {
+    "timeoutMs": 120000,
+    "maxQueueDepth": 4,
+    "dangerousBypass": false
+  },
   "weixin": {
     "enabled": true,
     "accountId": "YOUR-WEIXIN-ACCOUNT-ID",
     "syncFile": "/absolute/path/to/codex-wechat-bridge/tmp/weixin-sync.json",
-    "pollTimeoutMs": 35000
+    "pollTimeoutMs": 35000,
+    "stateDir": "/absolute/path/to/.openclaw",
+    "allowOwner": true,
+    "allowFrom": []
   }
 }

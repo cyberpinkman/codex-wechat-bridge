@@ -11,16 +11,47 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
-async function readJsonBody(request) {
+function getHeaderValue(request, headerName) {
+  const value = request.headers[headerName];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function readBearerToken(request) {
+  const authorization = getHeaderValue(request, "authorization");
+  if (typeof authorization === "string" && authorization.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim();
+  }
+  const bridgeToken = getHeaderValue(request, "x-bridge-token");
+  return typeof bridgeToken === "string" ? bridgeToken.trim() : "";
+}
+
+function requireAuthToken(request, expectedToken) {
+  if (!expectedToken) {
+    return false;
+  }
+  return readBearerToken(request) === expectedToken;
+}
+
+async function readJsonBody(request, maxBodyBytes) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk));
+    const buffer = Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maxBodyBytes) {
+      throw new Error("request body too large");
+    }
+    chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   if (!raw) {
     return {};
   }
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error("invalid json body");
+  }
 }
 
 async function main() {
@@ -32,7 +63,10 @@ async function main() {
     codex: {
       codexHome: settings.codexHome,
       cwd: settings.cwd,
-      sessionId: settings.sessionId
+      sessionId: settings.sessionId,
+      timeoutMs: settings.codex.timeoutMs,
+      dangerousBypass: settings.codex.dangerousBypass,
+      maxQueueDepth: settings.codex.maxQueueDepth
     },
     weixin: settings.weixin,
     log: (message) => console.log(message)
@@ -44,13 +78,22 @@ async function main() {
         sendJson(response, 200, {
           ok: true,
           service: "codex-wechat-bridge",
-          sessionId: settings.sessionId ?? process.env.CODEX_THREAD_ID ?? null
+          httpAuthConfigured: Boolean(settings.http.authToken),
+          weixinEnabled: settings.weixin.enabled
         });
         return;
       }
 
       if (request.method === "POST" && request.url === "/bridge/send") {
-        const body = await readJsonBody(request);
+        if (!requireAuthToken(request, settings.http.authToken)) {
+          sendJson(response, 401, {
+            ok: false,
+            error: "unauthorized"
+          });
+          return;
+        }
+
+        const body = await readJsonBody(request, settings.http.maxBodyBytes);
         const message = typeof body.message === "string" ? body.message.trim() : "";
         if (!message) {
           sendJson(response, 400, {
@@ -60,20 +103,32 @@ async function main() {
           return;
         }
 
+        if (
+          body.sessionId &&
+          !settings.http.allowSessionOverride &&
+          body.sessionId !== settings.sessionId
+        ) {
+          sendJson(response, 403, {
+            ok: false,
+            error: "session override is disabled"
+          });
+          return;
+        }
+
         const result = await sendMessageToCodexThread({
           codexHome: settings.codexHome,
           cwd: settings.cwd,
           sessionId: typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : settings.sessionId,
-          message
+          message,
+          timeoutMs: settings.codex.timeoutMs,
+          dangerousBypass: settings.codex.dangerousBypass,
+          maxQueueDepth: settings.codex.maxQueueDepth
         });
 
         sendJson(response, 200, {
           ok: true,
-          sessionId: result.sessionId,
           reply: result.reply,
-          transcriptPath: result.transcriptPath,
-          exitCode: result.exitCode,
-          stderrPreview: result.stderr.split("\n").filter(Boolean).slice(0, 8)
+          exitCode: result.exitCode
         });
         return;
       }
@@ -83,9 +138,16 @@ async function main() {
         error: "not found"
       });
     } catch (error) {
-      sendJson(response, 500, {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode =
+        message === "request body too large"
+          ? 413
+          : message === "invalid json body"
+            ? 400
+            : 500;
+      sendJson(response, statusCode, {
         ok: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: message
       });
     }
   });
@@ -97,9 +159,11 @@ async function main() {
           ok: true,
           host: settings.host,
           port: settings.port,
-          sessionId: settings.sessionId ?? process.env.CODEX_THREAD_ID ?? null,
+          httpAuthConfigured: Boolean(settings.http.authToken),
+          sessionOverrideEnabled: settings.http.allowSessionOverride,
+          codexDangerousBypass: settings.codex.dangerousBypass,
           weixinEnabled: settings.weixin.enabled,
-          weixinAccountId: settings.weixin.accountId ?? null
+          weixinOwnerLockEnabled: settings.weixin.allowOwner || settings.weixin.allowFrom.length > 0
         },
         null,
         2
